@@ -2,7 +2,7 @@ import { EventHandler } from "@create-figma-plugin/utilities";
 
 export interface CreateAvatarHandler extends EventHandler {
   name: "CREATE_AVATAR";
-  handler: (data: { props: Record<string, any>; componentName: string }) => void;
+  handler: (data: { props: Record<string, any>; componentName: string; code?: string }) => void;
 }
 
 export interface CloseHandler extends EventHandler {

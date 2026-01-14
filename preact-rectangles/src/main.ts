@@ -4,45 +4,183 @@ import { CloseHandler, CreateAvatarHandler } from "./types";
 
 export default function () {
   once<CreateAvatarHandler>("CREATE_AVATAR", async function (data) {
+    console.log("=== CREATE_AVATAR event received ===");
+    console.log("Data:", data);
+    
     try {
-      const { props, componentName } = data;
+      const { props, componentName, code } = data;
+      console.log(`Looking for component: "${componentName}"`);
+
+      // Determine which page to search in
+      // First, try to find a page with the same name as the component (capitalized)
+      const searchName = componentName.charAt(0).toUpperCase() + componentName.slice(1);
+      let searchPage: PageNode | null = null;
+      
+      // Try to find a page named "Button", "Avatar", etc.
+      const componentPage = figma.root.children.find(
+        (page) => {
+          const pageName = page.name;
+          const pageNameClean = pageName.replace(/^[^\w\s]+\s*/, '').trim();
+          return pageName === searchName || 
+                 pageName.toLowerCase() === componentName.toLowerCase() ||
+                 pageNameClean === searchName ||
+                 pageNameClean.toLowerCase() === componentName.toLowerCase();
+        }
+      ) as PageNode;
+      
+      if (componentPage) {
+        searchPage = componentPage;
+        console.log(`✅ Found page with component name: "${searchPage.name}"`);
+      } else {
+        searchPage = figma.currentPage;
+        console.log(`Page "${searchName}" not found, using current page: "${searchPage.name}"`);
+      }
 
       // Find the Component Set (not individual components)
-      const componentSet = figma.root.findOne(
-        (node) => 
-          node.type === "COMPONENT_SET" && 
-          node.name.toLowerCase() === componentName.toLowerCase()
-      ) as ComponentSetNode;
+      console.log(`Searching for component "${searchName}" in page: ${searchPage.name}`);
+      
+      let componentSet: ComponentSetNode | null = null;
+      
+      try {
+        console.log(`Starting component search in ${searchPage.name}...`);
+        
+        // Search in the specified page only
+        componentSet = searchPage.findOne(
+          (node) => {
+            if (node.type !== "COMPONENT_SET") return false;
+            
+            // Match by exact name, lowercase, or by removing emoji/special chars
+            const nodeName = node.name;
+            const nodeNameClean = nodeName.replace(/^[^\w\s]+\s*/, '').trim(); // Remove leading emoji/special chars
+            
+            const isMatch = nodeName === searchName || 
+                   nodeName.toLowerCase() === componentName.toLowerCase() ||
+                   nodeNameClean === searchName ||
+                   nodeNameClean.toLowerCase() === componentName.toLowerCase();
+            
+            if (isMatch) {
+              console.log(`✅ Found matching component set: "${nodeName}"`);
+            }
+            
+            return isMatch;
+          }
+        ) as ComponentSetNode;
+        
+        console.log("Component set search complete");
+      } catch (error) {
+        console.error("Error during component search:", error);
+        figma.notify(`❌ Error searching for component: ${(error as Error).message}`, { error: true });
+        emit("AVATAR_CREATED");
+        return;
+      }
+      
+      console.log("Component set found:", componentSet ? componentSet.name : "NOT FOUND");
 
       if (!componentSet) {
+        console.error(`Component Set "${searchName}" not found in page "${searchPage.name}"!`);
+        console.log("Trying to find a regular COMPONENT instead...");
+        
+        // Try to find a regular component (not a component set)
+        let regularComponent: ComponentNode | null = null;
+        
+        try {
+          // Search in the specified page
+          regularComponent = searchPage.findOne(
+            (node) => {
+              if (node.type !== "COMPONENT") return false;
+              
+              const nodeName = node.name;
+              const nodeNameClean = nodeName.replace(/^[^\w\s]+\s*/, '').trim();
+              
+              const isMatch = nodeName === searchName || 
+                     nodeName.toLowerCase() === componentName.toLowerCase() ||
+                     nodeNameClean === searchName ||
+                     nodeNameClean.toLowerCase() === componentName.toLowerCase();
+              
+              if (isMatch) {
+                console.log(`✅ Found matching regular component: "${nodeName}"`);
+              }
+              
+              return isMatch;
+            }
+          ) as ComponentNode;
+        } catch (error) {
+          console.error("Error searching for regular component:", error);
+        }
+        
+        if (regularComponent) {
+          console.log(`✅ Found regular component: ${regularComponent.name}`);
+          figma.notify(`Found Component: ${regularComponent.name} (note: not a Component Set)`);
+          
+          // Create an instance of the regular component
+          const instance = regularComponent.createInstance();
+          console.log("✅ Instance created successfully");
+          
+          // Position the instance in the center of the viewport
+          const viewportCenter = figma.viewport.center;
+          instance.x = viewportCenter.x;
+          instance.y = viewportCenter.y;
+          
+          // Select and zoom to the newly created instance
+          figma.currentPage.selection = [instance];
+          figma.viewport.scrollAndZoomIntoView([instance]);
+          
+          figma.notify(`✅ ${regularComponent.name} created (no properties set - not a Component Set)`);
+          emit("AVATAR_CREATED");
+          return;
+        }
+        
         // Debug: show what's available
-        const allComponentSets = figma.root.findAll(
+        console.log("Getting all component sets and components...");
+        const allComponentSets = searchPage.findAll(
           (node) => node.type === "COMPONENT_SET"
         ) as ComponentSetNode[];
         
-        const componentSetList = allComponentSets
-          .map(c => `• ${c.name}`)
-          .join("\n");
+        const allComponents = searchPage.findAll(
+          (node) => node.type === "COMPONENT"
+        ) as ComponentNode[];
+        
+        console.log("Available component sets:", allComponentSets.map(c => c.name));
+        console.log("Available regular components:", allComponents.map(c => c.name));
+        
+        const componentSetList = allComponentSets.length > 0
+          ? allComponentSets.map(c => `• ${c.name} (Component Set)`).join("\n")
+          : "";
+          
+        const componentList = allComponents.length > 0
+          ? allComponents.map(c => `• ${c.name} (Component)`).join("\n")
+          : "";
+        
+        const message = `❌ Component "${searchName}" not found in page "${searchPage.name}".\n\nAvailable:\n${componentSetList}${componentSetList && componentList ? "\n" : ""}${componentList}`;
         
         figma.notify(
-          `❌ Component Set "${componentName}" not found.\n\nAvailable Component Sets:\n${componentSetList || "No component sets found"}`, 
+          message || `❌ Component "${searchName}" not found. No components in "${searchPage.name}".`, 
           { error: true, timeout: 10000 }
         );
+        
+        // Emit completion so UI doesn't stay stuck
+        emit("AVATAR_CREATED");
         return;
       }
 
+      console.log(`✅ Found Component Set: ${componentSet.name}`);
       figma.notify(`Found Component Set: ${componentSet.name}`);
 
       // Get the default variant (first child component)
       const defaultVariant = componentSet.defaultVariant || componentSet.children[0] as ComponentNode;
+      console.log("Default variant:", defaultVariant ? defaultVariant.name : "NOT FOUND");
 
       if (!defaultVariant || defaultVariant.type !== "COMPONENT") {
+        console.error("No valid variant found!");
         figma.notify("❌ Could not find a variant in the component set", { error: true });
+        emit("AVATAR_CREATED");
         return;
       }
 
+      console.log("Creating instance...");
       // Create an instance of the default variant
       const instance = defaultVariant.createInstance();
+      console.log("✅ Instance created successfully");
 
       // Position the instance in the center of the viewport
       const viewportCenter = figma.viewport.center;
@@ -54,8 +192,9 @@ export default function () {
       console.log("Available component properties:", availableProps);
 
       // Map common prop names to Figma component properties
-      // These match your Figma component's actual property names
+      // Updated to include new Button component properties
       const propertyMapping: Record<string, string> = {
+        // Avatar properties
         size: "size",
         type: "type",
         shape: "shape",
@@ -63,9 +202,26 @@ export default function () {
         lowerBadge: "lower badge",
         upperBadge: "upper badge",
         initials: "initials",
-        "✏️ label": "label", // For button label
-        "icon L": "icon L",   // For button left icon
-        "icon R": "icon R",   // For button right icon
+        
+        // Button properties (new design system)
+        variant: "variant",      // filled, outlined, text
+        intent: "intent",        // primary, secondary, etc.
+        state: "state",          // default, hover, pressed, etc.
+        loading: "loading",      // boolean
+        disabled: "disabled",    // boolean
+        "With left icon": "With left icon",   // boolean
+        "With right icon": "With right icon", // boolean
+        
+        // Card properties
+        padding: "padding",
+        borderRadius: "borderRadius",
+        borderColor: "borderColor",
+        Elevation: "Elevation",
+        
+        // Legacy mappings for backward compatibility
+        "✏️ label": "label",
+        "icon L": "icon L",
+        "icon R": "icon R",
       };
 
       // Separate TEXT properties from other properties
@@ -75,6 +231,16 @@ export default function () {
       let imageUrl: string | null = null;
       
       for (const [propKey, propValue] of Object.entries(props)) {
+        console.log(`Processing prop: ${propKey} = ${propValue}`);
+        
+        // Special handling for button text (children)
+        if (propKey === "children" && componentName === "button") {
+          // For buttons, text goes directly to a text node, not as a property
+          textPropertiesToSet["buttonText"] = String(propValue);
+          console.log(`Set button text: ${propValue}`);
+          continue;
+        }
+        
         // Special handling for imageUrl
         if (propKey === "imageUrl") {
           imageUrl = String(propValue);
@@ -112,6 +278,7 @@ export default function () {
               console.log(`Found TEXT property: "${actualPropertyName}" (mapped from "${figmaPropertyName}")`);
             } else {
               propertiesToSet[actualPropertyName] = propValue;
+              console.log(`Set property: "${actualPropertyName}" = ${propValue}`);
             }
           } else {
             console.warn(`Property "${figmaPropertyName}" not found in available properties`);
@@ -124,15 +291,140 @@ export default function () {
       // Set non-text properties first
       if (Object.keys(propertiesToSet).length > 0) {
         try {
+          console.log("Setting properties:", propertiesToSet);
           instance.setProperties(propertiesToSet);
-          console.log("Set non-text properties:", propertiesToSet);
+          console.log("✅ Set non-text properties successfully");
         } catch (error) {
-          console.error("Property setting error:", error);
+          console.error("❌ Property setting error:", error);
+          figma.notify(`⚠️ Some properties could not be set: ${(error as Error).message}`, { 
+            timeout: 5000 
+          });
         }
       }
 
-      // Handle TEXT properties by updating text nodes directly
-      // Don't use setProperties() for TEXT - update the text node instead
+      // Special handling for Card components with nested content
+      if (componentName === "card" && code) {
+        console.log("Processing Card component with nested children...");
+        
+        // Find nested Button components
+        const nestedButtons = instance.findAll(node => {
+          if (node.type !== "INSTANCE") return false;
+          const mainComp = (node as InstanceNode).mainComponent;
+          if (!mainComp) return false;
+          const compName = mainComp.name.replace(/^[^\w\s]+\s*/, '').trim();
+          return compName.toLowerCase() === "button";
+        }) as InstanceNode[];
+        
+        console.log(`Found ${nestedButtons.length} nested button(s)`);
+        
+        // Parse the original code to extract button texts and props
+        // This is a simplified parser - you might need to enhance it
+        const buttonRegex = /<Button[^>]*>([\s\S]*?)<\/Button>/gi;
+        const buttonMatches = [...code.matchAll(buttonRegex)];
+        
+        console.log(`Found ${buttonMatches.length} button(s) in code`);
+        
+        // Update each nested button
+        buttonMatches.forEach((match, index) => {
+          if (index >= nestedButtons.length) return;
+          
+          const buttonInstance = nestedButtons[index];
+          const buttonContent = match[1].trim();
+          const buttonProps = match[0];
+          
+          console.log(`Processing button ${index}: "${buttonContent}"`);
+          
+          // Extract props from the button tag
+          const variantMatch = /variant=["']([^"']+)["']/.exec(buttonProps);
+          const intentMatch = /intent=["']([^"']+)["']/.exec(buttonProps);
+          
+          try {
+            // Set button properties if available
+            const buttonPropsToSet: Record<string, any> = {};
+            if (variantMatch) buttonPropsToSet.variant = variantMatch[1];
+            if (intentMatch) buttonPropsToSet.intent = intentMatch[1];
+            
+            if (Object.keys(buttonPropsToSet).length > 0) {
+              buttonInstance.setProperties(buttonPropsToSet);
+              console.log(`Set properties for button ${index}:`, buttonPropsToSet);
+            }
+            
+            // Update button text
+            const buttonTextNodes = buttonInstance.findAll(node => node.type === "TEXT") as TextNode[];
+            if (buttonTextNodes.length > 0 && buttonContent) {
+              const textNode = buttonTextNodes[0];
+              figma.loadFontAsync(textNode.fontName as FontName).then(() => {
+                textNode.characters = buttonContent;
+                console.log(`✅ Updated button ${index} text to: "${buttonContent}"`);
+              });
+            }
+          } catch (error) {
+            console.error(`Error updating button ${index}:`, error);
+          }
+        });
+        
+        // Find and update Heading text
+        const headingRegex = /<Heading[^>]*>([\s\S]*?)<\/Heading>/i;
+        const headingMatch = headingRegex.exec(code);
+        if (headingMatch) {
+          const headingText = headingMatch[1].trim();
+          console.log(`Found heading text: "${headingText}"`);
+          
+          // Find text nodes that might be the heading
+          const allTextNodes = instance.findAll(node => node.type === "TEXT") as TextNode[];
+          // Heading is typically the first large text node or one with "title" in its name
+          const headingNode = allTextNodes.find(node => 
+            node.name.toLowerCase().includes("title") || 
+            node.name.toLowerCase().includes("heading") ||
+            node.characters.includes("Card title")
+          );
+          
+          if (headingNode && headingText) {
+            try {
+              await figma.loadFontAsync(headingNode.fontName as FontName);
+              headingNode.characters = headingText;
+              console.log(`✅ Updated heading to: "${headingText}"`);
+            } catch (error) {
+              console.error("Error updating heading:", error);
+            }
+          }
+        }
+        
+        // Find and update Text/paragraph content
+        const textRegex = /<Text[^>]*>([\s\S]*?)<\/Text>/gi;
+        const textMatches = [...code.matchAll(textRegex)];
+        
+        if (textMatches.length > 0) {
+          console.log(`Found ${textMatches.length} text element(s)`);
+          
+          const allTextNodes = instance.findAll(node => node.type === "TEXT") as TextNode[];
+          // Filter out button text and heading
+          const contentTextNodes = allTextNodes.filter(node => {
+            const inButton = nestedButtons.some(btn => btn.findOne(n => n === node));
+            const isHeading = node.name.toLowerCase().includes("title") || 
+                            node.name.toLowerCase().includes("heading");
+            return !inButton && !isHeading;
+          });
+          
+          // Update content text nodes
+          textMatches.forEach((match, index) => {
+            if (index >= contentTextNodes.length) return;
+            const textContent = match[1].trim();
+            const textNode = contentTextNodes[index];
+            
+            try {
+              figma.loadFontAsync(textNode.fontName as FontName).then(() => {
+                textNode.characters = textContent;
+                console.log(`✅ Updated content text ${index} to: "${textContent}"`);
+              });
+            } catch (error) {
+              console.error(`Error updating text ${index}:`, error);
+            }
+          });
+        }
+      }
+
+      // Handle TEXT properties and button text by updating text nodes directly
       if (Object.keys(textPropertiesToSet).length > 0) {
         const instanceTextNodes = instance.findAll(node => node.type === "TEXT") as TextNode[];
         
@@ -143,7 +435,52 @@ export default function () {
           console.error("No text nodes found in instance");
           figma.notify("⚠️ No text nodes found in component", { timeout: 3000 });
         } else {
-          // For each text property, find and update the corresponding text node
+          // For button text (from children prop)
+          if (textPropertiesToSet["buttonText"]) {
+            const buttonText = textPropertiesToSet["buttonText"];
+            console.log(`Setting button text to: "${buttonText}"`);
+            
+            // For buttons, find the main text layer
+            let targetTextNode: TextNode | null = null;
+            
+            // Try to find text node by common button text layer names
+            for (const textNode of instanceTextNodes) {
+              const nodeName = textNode.name.toLowerCase();
+              if (nodeName.includes("label") || 
+                  nodeName.includes("text") || 
+                  nodeName.includes("button") ||
+                  textNode.characters.includes("Button") || // Default Figma button text
+                  textNode.characters.includes("Test")) {   // Your example shows "Test"
+                targetTextNode = textNode;
+                console.log(`Found button text node: ${textNode.name}`);
+                break;
+              }
+            }
+            
+            // If not found by name, use the first/largest text node
+            if (!targetTextNode && instanceTextNodes.length > 0) {
+              targetTextNode = instanceTextNodes[0];
+              console.log("Using first text node as fallback for button text");
+            }
+            
+            if (targetTextNode) {
+              try {
+                await figma.loadFontAsync(targetTextNode.fontName as FontName);
+                targetTextNode.characters = buttonText;
+                console.log(`✅ Updated button text to: "${buttonText}"`);
+              } catch (error) {
+                console.error("Error updating button text:", error);
+                figma.notify(`❌ Error updating button text: ${(error as Error).message}`, { 
+                  error: true 
+                });
+              }
+            }
+            
+            // Remove buttonText from the list so it doesn't get processed again
+            delete textPropertiesToSet["buttonText"];
+          }
+          
+          // Handle other TEXT properties (for avatars, etc.)
           for (const [propName, propValue] of Object.entries(textPropertiesToSet)) {
             console.log(`Looking for text node for property "${propName}" with value "${propValue}"`);
             
@@ -164,28 +501,10 @@ export default function () {
                 }
               }
               
-              // Strategy 3: If multiple text properties, try to match by checking main component
-              if (!targetTextNode && instanceTextNodes.length > 0) {
-                const mainComponent = instance.mainComponent;
-                if (mainComponent) {
-                  const mainTextNodes = mainComponent.findAll(node => node.type === "TEXT") as TextNode[];
-                  console.log(`Found ${mainTextNodes.length} text node(s) in main component`);
-                  
-                  // Match by position/index
-                  if (mainTextNodes.length === instanceTextNodes.length) {
-                    // If counts match, use first one (common case: single text property)
-                    if (Object.keys(textPropertiesToSet).length === 1) {
-                      targetTextNode = instanceTextNodes[0];
-                      console.log("Using first text node (matched by count)");
-                    }
-                  }
-                }
-                
-                // Strategy 4: Fallback to first text node
-                if (!targetTextNode) {
-                  targetTextNode = instanceTextNodes[0];
-                  console.log("Using first text node as fallback");
-                }
+              // Strategy 3: Fallback to first text node
+              if (!targetTextNode) {
+                targetTextNode = instanceTextNodes[0];
+                console.log("Using first text node as fallback");
               }
             }
             
@@ -204,21 +523,21 @@ export default function () {
                 
                 if (newText !== propValue) {
                   console.warn(`⚠️ Text mismatch! Expected "${propValue}" but got "${newText}"`);
-                  figma.notify(`⚠️ Text update may have failed for "${propName}"`, { timeout: 3000 });
                 }
               } catch (error) {
                 console.error(`Error updating text node for "${propName}":`, error);
-                figma.notify(`❌ Error updating "${propName}": ${(error as Error).message}`, { error: true });
+                figma.notify(`❌ Error updating "${propName}": ${(error as Error).message}`, { 
+                  error: true 
+                });
               }
             } else {
               console.error(`❌ Could not find text node for property: ${propName}`);
-              figma.notify(`❌ Could not find text node for "${propName}"`, { error: true });
             }
           }
         }
       }
 
-      // Handle image URL if present
+      // Handle image URL if present (for avatars)
       if (imageUrl) {
         console.log(`Processing image URL: ${imageUrl}`);
         figma.notify("🖼️ Fetching image...", { timeout: 2000 });
@@ -240,7 +559,6 @@ export default function () {
           console.log(`Image loaded successfully. Hash: ${imageHash}`);
           
           // Find the image layer in the instance
-          // Looking for the "img" frame or other common image layer names
           const imageLayer = instance.findOne(node => {
             // Check for frames, ellipses, or rectangles that could hold an image
             if (node.type !== "FRAME" && node.type !== "ELLIPSE" && node.type !== "RECTANGLE") return false;
@@ -269,7 +587,7 @@ export default function () {
             const newFills: Paint[] = [{
               type: "IMAGE",
               imageHash: imageHash,
-              scaleMode: "FILL", // Options: "FILL", "FIT", "CROP", "TILE"
+              scaleMode: "FILL",
             }];
             
             imageLayer.fills = newFills;
@@ -295,8 +613,8 @@ export default function () {
         );
       } else {
         figma.notify(
-          `✅ ${componentSet.name} created\n\nAvailable properties: ${availableProps.join(", ") || "none"}`,
-          { timeout: 5000 }
+          `✅ ${componentSet.name} created`,
+          { timeout: 3000 }
         );
       }
 
@@ -310,6 +628,9 @@ export default function () {
     } catch (error) {
       figma.notify(`❌ Error: ${(error as Error).message}`, { error: true });
       console.error("Plugin error:", error);
+      
+      // Make sure to emit completion even on error so UI doesn't stay stuck
+      emit("AVATAR_CREATED");
     }
   });
 

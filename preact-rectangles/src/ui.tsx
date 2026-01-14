@@ -29,8 +29,17 @@ function Plugin() {
 
   // Listen for avatar creation completion at the top level
   useEffect(() => {
+    console.log("Setting up AVATAR_CREATED listener");
     return on<AvatarCreatedHandler>("AVATAR_CREATED", () => {
-      emit<CloseHandler>("CLOSE");
+      console.log("=== AVATAR_CREATED event received ===");
+      setIsProcessing(false);
+      console.log("Set isProcessing to false");
+      
+      // Close after a brief delay to let user see the result
+      setTimeout(() => {
+        console.log("Closing plugin...");
+        emit<CloseHandler>("CLOSE");
+      }, 1000);
     });
   }, []);
 
@@ -87,10 +96,10 @@ function Plugin() {
     const children = match[2];
 
     // If there are children (text content), add it to props
-    // For buttons, map children to "✏️ label" to match Figma component prop
+    // For buttons, the text content is just "children" - Figma will use it as the label
     if (children && children.trim()) {
       if (componentType === "button") {
-        props["✏️ label"] = children.trim();
+        props.children = children.trim();
       } else {
         props.children = children.trim();
       }
@@ -105,12 +114,8 @@ function Plugin() {
       const propName = propMatch[1];
       const propValue = propMatch[2];
 
-      // Map variant to type for buttons
-      if (componentType === "button" && propName === "variant") {
-        props.type = propValue;
-      } else {
-        props[propName] = propValue;
-      }
+      // Direct mapping for button props - no transformation needed
+      props[propName] = propValue;
     }
 
     // Handle JSX element props: prop={<Component />}
@@ -119,12 +124,12 @@ function Plugin() {
       const propName = propMatch[1];
       const propValue = propMatch[2];
 
-      // For buttons, map iconL/iconR to "icon L"/"icon R" and set to true
+      // For buttons, map iconL/iconR to Figma's boolean toggles
       if (componentType === "button") {
-        if (propName === "iconL") {
-          props["icon L"] = true;
-        } else if (propName === "iconR") {
-          props["icon R"] = true;
+        if (propName === "iconL" || propName === "leftIcon") {
+          props["With left icon"] = true;
+        } else if (propName === "iconR" || propName === "rightIcon") {
+          props["With right icon"] = true;
         } else {
           props[propName] = `<${propValue} />`;
         }
@@ -142,11 +147,25 @@ function Plugin() {
       // Skip if already captured by other regex
       if (props[propName]) continue;
 
-      // If no explicit value, it's a truthy boolean prop
-      if (!propValue && !props[propName]) {
-        props[propName] = true;
-      } else if (propValue) {
-        props[propName] = propValue === "true";
+      // Map specific boolean props for buttons
+      if (componentType === "button") {
+        // Map common boolean prop names to Figma's naming
+        if (propName === "loading") {
+          props.loading = propValue === "true" || !propValue;
+        } else if (propName === "disabled") {
+          props.disabled = propValue === "true" || !propValue;
+        } else if (!propValue && !props[propName]) {
+          props[propName] = true;
+        } else if (propValue) {
+          props[propName] = propValue === "true";
+        }
+      } else {
+        // If no explicit value, it's a truthy boolean prop
+        if (!propValue && !props[propName]) {
+          props[propName] = true;
+        } else if (propValue) {
+          props[propName] = propValue === "true";
+        }
       }
     }
 
@@ -161,6 +180,10 @@ function Plugin() {
 
   const handleCreateComponent = useCallback(
     function () {
+      console.log("=== handleCreateComponent called ===");
+      console.log("Value:", value);
+      console.log("Component name:", componentName);
+      
       if (!value.trim()) {
         setResult("Please paste Storybook code first");
         return;
@@ -173,15 +196,18 @@ function Plugin() {
 
       setIsProcessing(true);
       setResult("");
+      console.log("Set isProcessing to true");
 
       try {
         const props = parseComponentProps(value, componentName);
+        console.log("=== Parsed props ===");
+        console.log(props);
 
         if (!props) {
           const exampleCode =
             componentName === "avatar"
               ? '<Avatar name="John Doe" size="large" />'
-              : '<Button size="m" variant="contained">Button</Button>';
+              : '<Button size="lg" intent="primary" variant="filled">Button Text</Button>';
 
           setResult(
             `No ${
@@ -197,18 +223,31 @@ function Plugin() {
         // Add default values for buttons if not specified
         if (componentName === "button") {
           if (!props.size) {
-            props.size = "m"; // Default to medium size
+            props.size = "lg"; // Default to large size
           }
-          if (!props.type) {
-            props.type = "contained"; // Default to contained variant
+          if (!props.variant) {
+            props.variant = "filled"; // Default to filled variant
+          }
+          if (!props.intent) {
+            props.intent = "primary"; // Default to primary intent
+          }
+          if (!props.state) {
+            props.state = "default"; // Default state
           }
         }
 
-        // Send props and component name to main thread
+        console.log("=== Emitting CREATE_AVATAR event ===");
+        console.log("Props to send:", props);
+        console.log("Component name:", componentName);
+        
+        // Send props, component name, and original code to main thread
         emit<CreateAvatarHandler>("CREATE_AVATAR", {
           props,
           componentName,
-        });
+          code: value,
+        } as any);
+        
+        console.log("Event emitted successfully");
 
         setResult(
           `${componentName} will be created with props:\n\n${JSON.stringify(
@@ -217,8 +256,11 @@ function Plugin() {
             2
           )}\n\nCheck your Figma canvas!`
         );
-        setIsProcessing(false);
+        
+        // Don't set isProcessing to false here - wait for AVATAR_CREATED event
+        console.log("Waiting for AVATAR_CREATED event...");
       } catch (error) {
+        console.error("Error in handleCreateComponent:", error);
         setResult(
           `Error parsing ${componentName} props: ` + (error as Error).message
         );
@@ -237,12 +279,15 @@ function Plugin() {
   const componentOptions: Array<DropdownOption> = [
     { value: "avatar", text: "Avatar" },
     { value: "button", text: "Button" },
+    { value: "card", text: "Card" },
   ];
 
   const placeholderText =
     componentName === "avatar"
       ? `Paste your Storybook code here...\n\nExample:\n<Avatar\n  name="John Doe"\n  size="large"\n  variant="circle"\n  showStatus={true}\n/>`
-      : `Paste your Storybook code here...\n\nExample:\n<Button\n  iconL={<Plus />}\n  iconR={<ArrowRight />}\n  size="m"\n  variant="contained"\n>\n  Button\n</Button>`;
+      : componentName === "card"
+      ? `Paste your Storybook code here...\n\nExample:\n<Card padding="6" borderRadius="xl">\n  <Heading>Card Title</Heading>\n  <Text>Card content here</Text>\n  <Button>Action</Button>\n</Card>`
+      : `Paste your Storybook code here...\n\nExample:\n<Button\n  size="lg"\n  intent="primary"\n  variant="filled"\n  iconL={<Plus />}\n  disabled={false}\n>\n  Button Text\n</Button>`;
 
   return (
     <Container space="medium">
