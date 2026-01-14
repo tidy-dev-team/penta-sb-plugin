@@ -19,7 +19,7 @@
       "figma"
     ],
     "id": "sb-plugin",
-    "name": "SB Plugin",
+    "name": "Penta SB Plugin",
     "main": "src/main.ts",
     "ui": "src/ui.tsx"
   }
