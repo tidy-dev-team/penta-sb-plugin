@@ -1,0 +1,17 @@
+button {
+  padding: 8px !important;
+  height: fit-content !important;
+  cursor: pointer;
+}
+
+button.secondary {
+  background-color: #fff;
+}
+
+button:hover {
+  filter: brightness(90%);
+}
+
+button.secondary:hover {
+  filter: brightness(98%);
+}
