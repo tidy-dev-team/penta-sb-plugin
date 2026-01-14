@@ -105,12 +105,9 @@ function Plugin() {
       const propName = propMatch[1];
       const propValue = propMatch[2];
 
-      // Map variant to type for buttons
-      if (componentType === "button" && propName === "variant") {
-        props.type = propValue;
-      } else {
-        props[propName] = propValue;
-      }
+      // For the new design system buttons we keep prop
+      // names as-is (size, variant, state, intent, etc.)
+      props[propName] = propValue;
     }
 
     // Handle JSX element props: prop={<Component />}
@@ -119,12 +116,13 @@ function Plugin() {
       const propName = propMatch[1];
       const propValue = propMatch[2];
 
-      // For buttons, map iconL/iconR to "icon L"/"icon R" and set to true
+      // For buttons, detect left/right icon props and set flags
       if (componentType === "button") {
-        if (propName === "iconL") {
-          props["icon L"] = true;
-        } else if (propName === "iconR") {
-          props["icon R"] = true;
+        // Support both old (iconL/iconR) and new (leftIcon/rightIcon) prop names
+        if (propName === "iconL" || propName === "leftIcon") {
+          props.withLeftIcon = true;
+        } else if (propName === "iconR" || propName === "rightIcon") {
+          props.withRightIcon = true;
         } else {
           props[propName] = `<${propValue} />`;
         }
@@ -188,7 +186,6 @@ function Plugin() {
               componentName.charAt(0).toUpperCase() + componentName.slice(1)
             } component found in the pasted code.\n\nMake sure your code includes something like:\n${exampleCode}`
           );
-          setIsProcessing(false);
           return;
         }
 
@@ -197,10 +194,13 @@ function Plugin() {
         // Add default values for buttons if not specified
         if (componentName === "button") {
           if (!props.size) {
-            props.size = "m"; // Default to medium size
+            props.size = "lg"; // Default to large size (matches DS example)
           }
-          if (!props.type) {
-            props.type = "contained"; // Default to contained variant
+          if (!props.variant) {
+            props.variant = "filled"; // Default variant in new DS
+          }
+          if (!props.intent) {
+            props.intent = "primary"; // Default intent in new DS
           }
         }
 
@@ -217,11 +217,11 @@ function Plugin() {
             2
           )}\n\nCheck your Figma canvas!`
         );
-        setIsProcessing(false);
       } catch (error) {
         setResult(
           `Error parsing ${componentName} props: ` + (error as Error).message
         );
+      } finally {
         setIsProcessing(false);
       }
 
@@ -242,7 +242,7 @@ function Plugin() {
   const placeholderText =
     componentName === "avatar"
       ? `Paste your Storybook code here...\n\nExample:\n<Avatar\n  name="John Doe"\n  size="large"\n  variant="circle"\n  showStatus={true}\n/>`
-      : `Paste your Storybook code here...\n\nExample:\n<Button\n  iconL={<Plus />}\n  iconR={<ArrowRight />}\n  size="m"\n  variant="contained"\n>\n  Button\n</Button>`;
+      : `Paste your Storybook code here...\n\nExample:\n<Button\n  size="lg"\n  variant="filled"\n  intent="primary"\n>\n  Button\n</Button>`;
 
   return (
     <Container space="medium">

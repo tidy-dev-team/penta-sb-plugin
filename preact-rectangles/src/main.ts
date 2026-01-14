@@ -4,14 +4,22 @@ import { CloseHandler, CreateAvatarHandler } from "./types";
 
 export default function () {
   once<CreateAvatarHandler>("CREATE_AVATAR", async function (data) {
+    // Helper to normalize component set names (handles "Buttons / Button" etc.)
+    const normalizeComponentSetName = (name: string): string => {
+      const parts = name.split("/");
+      return parts[parts.length - 1].trim().toLowerCase();
+    };
+
+    let shouldEmitAvatarCreated = true;
+
     try {
       const { props, componentName } = data;
 
       // Find the Component Set (not individual components)
       const componentSet = figma.root.findOne(
-        (node) => 
-          node.type === "COMPONENT_SET" && 
-          node.name.toLowerCase() === componentName.toLowerCase()
+        (node) =>
+          node.type === "COMPONENT_SET" &&
+          normalizeComponentSetName(node.name) === componentName.toLowerCase()
       ) as ComponentSetNode;
 
       if (!componentSet) {
@@ -28,6 +36,7 @@ export default function () {
           `❌ Component Set "${componentName}" not found.\n\nAvailable Component Sets:\n${componentSetList || "No component sets found"}`, 
           { error: true, timeout: 10000 }
         );
+        // We still want the UI to close gracefully even if nothing was created
         return;
       }
 
@@ -56,16 +65,32 @@ export default function () {
       // Map common prop names to Figma component properties
       // These match your Figma component's actual property names
       const propertyMapping: Record<string, string> = {
+        // Shared
         size: "size",
+
+        // Old button API (backwards compatibility)
         type: "type",
+        "icon L": "icon L",
+        "icon R": "icon R",
+
+        // Avatar
         shape: "shape",
         outline: "outline",
         lowerBadge: "lower badge",
         upperBadge: "upper badge",
         initials: "initials",
-        "✏️ label": "label", // For button label
-        "icon L": "icon L",   // For button left icon
-        "icon R": "icon R",   // For button right icon
+
+        // New Button design system
+        variant: "variant",
+        state: "state",
+        intent: "intent",
+        loading: "loading",
+        disabled: "disabled",
+        withLeftIcon: "with left icon",
+        withRightIcon: "with right icon",
+
+        // Text label (for buttons)
+        "✏️ label": "label",
       };
 
       // Separate TEXT properties from other properties
@@ -304,12 +329,14 @@ export default function () {
       figma.currentPage.selection = [instance];
       figma.viewport.scrollAndZoomIntoView([instance]);
 
-      // Emit completion event so UI can close
-      emit("AVATAR_CREATED");
-
     } catch (error) {
       figma.notify(`❌ Error: ${(error as Error).message}`, { error: true });
       console.error("Plugin error:", error);
+    } finally {
+      if (shouldEmitAvatarCreated) {
+        // Always notify the UI that we're done (success or failure)
+        emit("AVATAR_CREATED");
+      }
     }
   });
 
