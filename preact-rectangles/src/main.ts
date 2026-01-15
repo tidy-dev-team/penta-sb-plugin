@@ -367,6 +367,13 @@ export default function () {
       const cleanText = (text: string) => {
         return text
           .replace(/\{\s*['"]\s*['"]\s*\}/g, '') // Remove {" "} or {' '}
+          .replace(/\{['"]\s*/g, '') // Remove opening {" or {'
+          .replace(/\s*['"]\}/g, '') // Remove closing "} or '}
+          .replace(/\}\s*\{/g, '') // Remove }{ patterns
+          .replace(/^\s*\}+\s*/g, '') // Remove leading } (one or more)
+          .replace(/\s*\{+\s*$/g, '') // Remove trailing { (one or more)
+          .replace(/\}\s*$/g, '') // Remove trailing }
+          .replace(/^\s*\{/g, '') // Remove leading {
           .replace(/\s+/g, ' ') // Normalize whitespace
           .trim();
       };
@@ -430,15 +437,60 @@ export default function () {
           const textNode = figma.createText();
           textNode.name = "Heading";
           
-          // Load a bold font
-          await figma.loadFontAsync({ family: "Inter", style: "Bold" });
-          textNode.fontName = { family: "Inter", style: "Bold" };
-          textNode.fontSize = 24;
+          // Try to find and apply the h2 text style from Figma
+          const h2Style = figma.getLocalTextStyles().find(style => 
+            style.name.toLowerCase().includes("h2") || 
+            style.name.toLowerCase().includes("title/h2") ||
+            style.name.toLowerCase().includes("desktop title/h2")
+          );
+          
+          if (h2Style) {
+            console.log(`Found text style: ${h2Style.name}`);
+            // Load the font from the style first
+            await figma.loadFontAsync(h2Style.fontName as FontName);
+            textNode.textStyleId = h2Style.id;
+            console.log(`✅ Applied text style: ${h2Style.name}`);
+          } else {
+            console.warn("Could not find h2 text style, using default bold font");
+            // Fallback to manual styling
+            await figma.loadFontAsync({ family: "Inter", style: "Bold" });
+            textNode.fontName = { family: "Inter", style: "Bold" };
+            textNode.fontSize = 24;
+          }
+          
+          // Set text content BEFORE applying color
           textNode.characters = headingText;
           
           // Set text to fill width of parent container
           textNode.textAutoResize = "HEIGHT";
           textNode.resize(400, textNode.height); // Give it a reasonable width
+          
+          // Apply color variable AFTER text style and content are set
+          const primaryColorVariable = figma.variables.getLocalVariables().find(variable =>
+            variable.name === "Color/foreground/primary" ||
+            variable.name.toLowerCase() === "Color/foreground/primary"
+          );
+          
+          if (primaryColorVariable) {
+            console.log(`Found color variable: ${primaryColorVariable.name}`);
+            try {
+              // Bind variable to fills - set fills first, then bind the variable
+              const fills: Paint[] = [{
+                type: "SOLID",
+                color: { r: 0, g: 0, b: 0 }, // Placeholder color
+                opacity: 1
+              }];
+              textNode.fills = fills;
+              // Use type assertion since TypeScript types may not be fully up to date
+              (textNode as any).setBoundVariable("fills", primaryColorVariable.id);
+              console.log(`✅ Applied color variable to heading`);
+            } catch (error) {
+              console.warn("Could not bind color variable to heading:", error);
+            }
+          } else {
+            console.warn("Could not find Color/foreground/primary variable for heading");
+            console.log("Available variables:", figma.variables.getLocalVariables().map(v => v.name).join(", "));
+          }
           
           contentFrame.appendChild(textNode);
           console.log("✅ Added heading to content frame");
@@ -461,19 +513,86 @@ export default function () {
           textContainer.fills = [];
           
           for (const match of textMatches) {
-            const textContent = cleanText(match[1]);
+            const rawText = match[1];
+            console.log(`Raw text captured: "${rawText}"`);
+            const textContent = cleanText(rawText);
+            console.log(`Cleaned text: "${textContent}"`);
             if (textContent) {
               const textNode = figma.createText();
               textNode.name = "Text";
               
-              await figma.loadFontAsync({ family: "Inter", style: "Regular" });
-              textNode.fontName = { family: "Inter", style: "Regular" };
-              textNode.fontSize = 14;
+              // Try to find and apply the body text style from Figma
+              // Prioritize 16R (Regular) specifically, not 16B (Bold)
+              let bodyStyle = figma.getLocalTextStyles().find(style => {
+                const styleName = style.name.toLowerCase();
+                return (styleName.includes("16r") || styleName.includes("16 r")) && 
+                       (styleName.includes("tbody5") || styleName.includes("paragraph"));
+              });
+              
+              // Fallback to any tbody5 regular style
+              if (!bodyStyle) {
+                bodyStyle = figma.getLocalTextStyles().find(style => {
+                  const styleName = style.name.toLowerCase();
+                  return styleName.includes("tbody5") && 
+                         (styleName.includes("regular") || styleName.includes("16r"));
+                });
+              }
+              
+              // More general fallback
+              if (!bodyStyle) {
+                bodyStyle = figma.getLocalTextStyles().find(style => {
+                  const styleName = style.name.toLowerCase();
+                  return styleName.includes("paragraph") && 
+                         styleName.includes("16") && 
+                         !styleName.includes("16b"); // Exclude bold
+                });
+              }
+              
+              if (bodyStyle) {
+                console.log(`Found body text style: ${bodyStyle.name}`);
+                // Load the font from the style first
+                await figma.loadFontAsync(bodyStyle.fontName as FontName);
+                textNode.textStyleId = bodyStyle.id;
+                console.log(`✅ Applied text style: ${bodyStyle.name}`);
+              } else {
+                console.warn("Could not find body text style, using default");
+                await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+                textNode.fontName = { family: "Inter", style: "Regular" };
+                textNode.fontSize = 16;
+              }
+              
+              // Set text content BEFORE applying color
               textNode.characters = textContent;
               
               // Set text to wrap and fill width
               textNode.textAutoResize = "HEIGHT";
               textNode.resize(400, textNode.height);
+              
+              // Apply color variable AFTER text style and content are set
+              const primaryColorVariable = figma.variables.getLocalVariables().find(variable =>
+                variable.name === "Color/foreground/primary" ||
+                variable.name.toLowerCase() === "Color/foreground/primary"
+              );
+              
+              if (primaryColorVariable) {
+                console.log(`Found color variable: ${primaryColorVariable.name}`);
+                try {
+                  // Bind variable to fills - set fills first, then bind the variable
+                  const fills: Paint[] = [{
+                    type: "SOLID",
+                    color: { r: 0, g: 0, b: 0 }, // Placeholder color
+                    opacity: 1
+                  }];
+                  textNode.fills = fills;
+                  // Use type assertion since TypeScript types may not be fully up to date
+                  (textNode as any).setBoundVariable("fills", primaryColorVariable.id);
+                  console.log(`✅ Applied color variable to body text`);
+                } catch (error) {
+                  console.warn("Could not bind color variable to body text:", error);
+                }
+              } else {
+                console.warn("Could not find Color/foreground/primary variable for body text");
+              }
               
               textContainer.appendChild(textNode);
             }
@@ -524,12 +643,16 @@ export default function () {
           
           if (buttonComponent) {
             console.log("Found Button component:", buttonComponent.name);
+            console.log(`Processing ${buttonMatches.length} button(s)...`);
             
-            for (const match of buttonMatches) {
+            for (let i = 0; i < buttonMatches.length; i++) {
+              const match = buttonMatches[i];
               const buttonContent = cleanText(match[1]);
               const buttonTag = match[0];
               
-              console.log(`Parsing button tag: ${buttonTag}`);
+              console.log(`\n=== Processing Button ${i + 1}/${buttonMatches.length} ===`);
+              console.log(`Button text: "${buttonContent}"`);
+              console.log(`Button tag: ${buttonTag.substring(0, 100)}...`);
               
               // Extract button props from the tag
               const variantMatch = /variant\s*=\s*["']([^"']+)["']/i.exec(buttonTag);
@@ -546,7 +669,8 @@ export default function () {
               // Variant: use from code if present, otherwise default to "filled"
               if (variantMatch) {
                 const variant = variantMatch[1];
-                buttonPropsToSet.variant = variant === "outline" ? "outlined" : variant;
+                // Use the variant as-is from React code (don't convert outline to outlined)
+                buttonPropsToSet.variant = variant;
               } else {
                 // If no variant specified in React code, it means default (filled)
                 buttonPropsToSet.variant = "filled";
@@ -571,24 +695,95 @@ export default function () {
               
               console.log(`Button properties to set:`, buttonPropsToSet);
               
-              // Set the properties
+              // Try to set the properties with multiple fallback strategies
+              let propertiesSet = false;
+              
+              // Strategy 1: Try exact properties from React code
               try {
                 buttonInstance.setProperties(buttonPropsToSet);
-                console.log(`✅ Set button properties successfully`);
+                console.log(`✅ Set button properties successfully:`, buttonPropsToSet);
+                propertiesSet = true;
               } catch (propError) {
-                console.warn(`⚠️ Could not set button properties:`, propError);
-                // If the exact combination doesn't exist, try with just intent
+                console.warn(`⚠️ Strategy 1 failed (exact match):`, propError);
+              }
+              
+              // Strategy 2: If outline + secondary failed, try outline + primary
+              if (!propertiesSet && buttonPropsToSet.variant === "outline" && buttonPropsToSet.intent === "secondary") {
                 try {
-                  buttonInstance.setProperties({
-                    intent: buttonPropsToSet.intent,
+                  const outlinePrimaryProps = {
+                    ...buttonPropsToSet,
+                    intent: "primary"
+                  };
+                  buttonInstance.setProperties(outlinePrimaryProps);
+                  console.log(`✅ Set button with outline + primary (secondary not available):`, outlinePrimaryProps);
+                  propertiesSet = true;
+                } catch (propError) {
+                  console.warn(`⚠️ Strategy 2 failed (outline + primary):`, propError);
+                }
+              }
+              
+              // Strategy 3: Try without size (use component default size)
+              if (!propertiesSet) {
+                try {
+                  const propsWithoutSize = { ...buttonPropsToSet };
+                  delete propsWithoutSize.size;
+                  buttonInstance.setProperties(propsWithoutSize);
+                  console.log(`✅ Set button properties without size:`, propsWithoutSize);
+                  propertiesSet = true;
+                } catch (propError) {
+                  console.warn(`⚠️ Strategy 3 failed (without size):`, propError);
+                }
+              }
+              
+              // Strategy 4: Try text variant (if outline doesn't work)
+              if (!propertiesSet && buttonPropsToSet.variant === "outline") {
+                try {
+                  const textVariantProps = {
+                    ...buttonPropsToSet,
+                    variant: "text"
+                  };
+                  buttonInstance.setProperties(textVariantProps);
+                  console.log(`✅ Set button with text variant (outline not available):`, textVariantProps);
+                  propertiesSet = true;
+                } catch (propError) {
+                  console.warn(`⚠️ Strategy 4 failed (text variant):`, propError);
+                }
+              }
+              
+              // Strategy 5: Try with variant="filled" instead
+              if (!propertiesSet) {
+                try {
+                  const filledProps = {
+                    ...buttonPropsToSet,
+                    variant: "filled"
+                  };
+                  buttonInstance.setProperties(filledProps);
+                  console.log(`✅ Set button with filled variant fallback:`, filledProps);
+                  propertiesSet = true;
+                } catch (propError) {
+                  console.warn(`⚠️ Strategy 5 failed (filled fallback):`, propError);
+                }
+              }
+              
+              // Strategy 6: Try with just intent="primary" (safest fallback)
+              if (!propertiesSet) {
+                try {
+                  const safeProps = {
                     variant: "filled",
+                    intent: "primary",
                     size: "lg",
                     state: "default"
-                  });
-                  console.log(`✅ Set button with fallback properties`);
-                } catch (fallbackError) {
-                  console.error(`❌ Even fallback properties failed:`, fallbackError);
+                  };
+                  buttonInstance.setProperties(safeProps);
+                  console.log(`✅ Set button with safe fallback properties:`, safeProps);
+                  propertiesSet = true;
+                } catch (propError) {
+                  console.error(`❌ All strategies failed:`, propError);
                 }
+              }
+              
+              if (!propertiesSet) {
+                console.error(`❌ Could not set any button properties for: ${buttonContent}`);
               }
               
               // Update button text
@@ -600,7 +795,8 @@ export default function () {
               }
               
               buttonContainer.appendChild(buttonInstance);
-              console.log(`✅ Created button: "${buttonContent}"`);
+              console.log(`✅ Button ${i + 1} complete: "${buttonContent}"`);
+              console.log(`=== End Button ${i + 1} ===\n`);
             }
             
             contentFrame.appendChild(buttonContainer);
