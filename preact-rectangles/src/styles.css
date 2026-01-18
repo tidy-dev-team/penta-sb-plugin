@@ -15,3 +15,7 @@ button:hover {
 button.secondary:hover {
   filter: brightness(98%);
 }
+
+textarea {
+  height: 352px;
+}

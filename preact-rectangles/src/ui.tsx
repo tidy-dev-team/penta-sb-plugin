@@ -21,6 +21,8 @@ import {
   AvatarCreatedHandler,
 } from "./types";
 
+import "!./styles.css";
+
 function Plugin() {
   const [value, setValue] = useState<string>("");
   const [result, setResult] = useState<string>("");
@@ -266,7 +268,7 @@ function Plugin() {
   const componentOptions: Array<DropdownOption> = [
     { value: "card", text: "Card" },
     { value: "button", text: "Button" },
-    { value: "title", text: "Title" },
+    { value: "title", text: "Heading" },
   ];
 
   const placeholderText =
@@ -323,7 +325,7 @@ function Plugin() {
           <TextboxMultiline value={result} rows={8} disabled />
         </Fragment>
       )}
-      <VerticalSpace space="extraLarge" />
+      <VerticalSpace space="extraSmall" />
       <Columns space="extraSmall">
         <Button fullWidth onClick={handleCloseButtonClick} secondary>
           Close
