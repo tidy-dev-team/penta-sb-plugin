@@ -8,8 +8,19 @@ export default function () {
     console.log("Data:", data);
     
     try {
-      const { props, componentName } = data;
+      let { props, componentName } = data;
       const code = (data as any).code as string | undefined;
+      
+      // If we have code, try to extract the first component after return
+      if (code && componentName) {
+        const returnMatch = /return\s*\(\s*<(\w+)/i.exec(code);
+        if (returnMatch && returnMatch[1]) {
+          const extractedComponentName = returnMatch[1].toLowerCase();
+          console.log(`Extracted component from return statement: ${extractedComponentName}`);
+          componentName = extractedComponentName;
+        }
+      }
+      
       console.log(`Looking for component: "${componentName}"`);
 
       const searchName = componentName.charAt(0).toUpperCase() + componentName.slice(1);
@@ -243,6 +254,15 @@ export default function () {
         },
       };
 
+      // Mapping from React color prop values to Figma variable names
+      const colorVariableMapping: Record<string, string> = {
+        "bodyPrimary": "Color/foreground/primary",
+        "bodySecondary": "Color/foreground/secondary",
+        "heading": "Color/foreground/primary",
+        "primary": "Color/foreground/primary",
+        "secondary": "Color/foreground/secondary",
+      };
+
       const propertiesToSet: Record<string, any> = {};
       const textPropertiesToSet: Record<string, string> = {};
       let imageUrl: string | null = null;
@@ -336,13 +356,16 @@ export default function () {
           .trim();
       };
 
-      const applyColorVariable = async (textNode: TextNode, variableName: string = "Color/foreground/primary") => {
+      const applyColorVariable = async (textNode: TextNode, colorProp: string = "bodyPrimary") => {
+        // Map the React color prop to the Figma variable name
+        const variableName = colorVariableMapping[colorProp] || "Color/foreground/primary";
+        
         const colorVariable = figma.variables.getLocalVariables().find(variable =>
           variable.name === variableName
         );
         
         if (colorVariable) {
-          console.log(`Found color variable: ${colorVariable.name}`);
+          console.log(`Found color variable: ${colorVariable.name} (from color prop: ${colorProp})`);
           try {
             const fills = textNode.fills as SolidPaint[];
             if (fills && fills.length > 0 && fills[0].type === "SOLID") {
@@ -415,6 +438,12 @@ export default function () {
           const headingText = cleanText(headingMatch[1]);
           console.log(`Creating heading: "${headingText}"`);
           
+          // Extract color prop from Heading tag
+          const headingTag = headingMatch[0];
+          const headingColorMatch = /color\s*=\s*["']([^"']+)["']/i.exec(headingTag);
+          const headingColor = headingColorMatch ? headingColorMatch[1] : "heading";
+          console.log(`Heading color prop: ${headingColor}`);
+          
           const textNode = figma.createText();
           textNode.name = "Heading";
           
@@ -441,7 +470,7 @@ export default function () {
           textNode.textAutoResize = "HEIGHT";
           textNode.resize(400, textNode.height);
           
-          await applyColorVariable(textNode);
+          await applyColorVariable(textNode, headingColor);
           
           contentFrame.appendChild(textNode);
           console.log("✅ Added heading to content frame");
@@ -463,9 +492,16 @@ export default function () {
           
           for (const match of textMatches) {
             const rawText = match[1];
+            const textTag = match[0];
             console.log(`Raw text captured: "${rawText}"`);
             const textContent = cleanText(rawText);
             console.log(`Cleaned text: "${textContent}"`);
+            
+            // Extract color prop from Text tag
+            const textColorMatch = /color\s*=\s*["']([^"']+)["']/i.exec(textTag);
+            const textColor = textColorMatch ? textColorMatch[1] : "bodyPrimary";
+            console.log(`Text color prop: ${textColor}`);
+            
             if (textContent) {
               const textNode = figma.createText();
               textNode.name = "Text";
@@ -510,7 +546,7 @@ export default function () {
               textNode.textAutoResize = "HEIGHT";
               textNode.resize(400, textNode.height);
               
-              await applyColorVariable(textNode);
+              await applyColorVariable(textNode, textColor);
               
               textContainer.appendChild(textNode);
             }

@@ -25,7 +25,7 @@ function Plugin() {
   const [value, setValue] = useState<string>("");
   const [result, setResult] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [componentName, setComponentName] = useState<string>("avatar");
+  const [componentName, setComponentName] = useState<string>("card"); // Changed default to "card"
 
   // Listen for avatar creation completion at the top level
   useEffect(() => {
@@ -47,24 +47,9 @@ function Plugin() {
     function (event: JSX.TargetedEvent<HTMLTextAreaElement>) {
       const newValue = event.currentTarget.value;
       setValue(newValue);
-
-      // Auto-detect component type from pasted code
-      if (newValue.trim()) {
-        // Check for Button component (with or without props/space)
-        if (/<Button[\s>]/i.test(newValue)) {
-          if (componentName !== "button") {
-            setComponentName("button");
-          }
-        }
-        // Check for Avatar component (with or without props/space)
-        else if (/<Avatar[\s>]/i.test(newValue)) {
-          if (componentName !== "avatar") {
-            setComponentName("avatar");
-          }
-        }
-      }
+      // Removed auto-detection logic
     },
-    [componentName]
+    []
   );
 
   const handleComponentNameChange = useCallback(function (
@@ -205,8 +190,10 @@ function Plugin() {
 
         if (!props) {
           const exampleCode =
-            componentName === "avatar"
-              ? '<Avatar name="John Doe" size="large" />'
+            componentName === "title"
+              ? '<Title name="John Doe" size="large" />'
+              : componentName === "card"
+              ? '<Card padding="6" borderRadius="xl">\n  <Heading>Card Title</Heading>\n  <Text>Card content</Text>\n</Card>'
               : '<Button size="lg" intent="primary" variant="filled">Button Text</Button>';
 
           setResult(
@@ -277,14 +264,14 @@ function Plugin() {
   }, []);
 
   const componentOptions: Array<DropdownOption> = [
-    { value: "avatar", text: "Avatar" },
-    { value: "button", text: "Button" },
     { value: "card", text: "Card" },
+    { value: "button", text: "Button" },
+    { value: "title", text: "Title" },
   ];
 
   const placeholderText =
-    componentName === "avatar"
-      ? `Paste your Storybook code here...\n\nExample:\n<Avatar\n  name="John Doe"\n  size="large"\n  variant="circle"\n  showStatus={true}\n/>`
+    componentName === "title"
+      ? `Paste your Storybook code here...\n\nExample:\n<Title\n  name="John Doe"\n  size="large"\n  variant="circle"\n  showStatus={true}\n/>`
       : componentName === "card"
       ? `Paste your Storybook code here...\n\nExample:\n<Card padding="6" borderRadius="xl">\n  <Heading>Card Title</Heading>\n  <Text>Card content here</Text>\n  <Button>Action</Button>\n</Card>`
       : `Paste your Storybook code here...\n\nExample:\n<Button\n  size="lg"\n  intent="primary"\n  variant="filled"\n  iconL={<Plus />}\n  disabled={false}\n>\n  Button Text\n</Button>`;
